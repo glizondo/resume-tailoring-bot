@@ -7,8 +7,10 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 from pathlib import Path
 import numpy as np
 import os
-
+from database import database
 from credentials import credentials
+import sqlite3
+
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -16,14 +18,18 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
+connection = sqlite3.connect("./database/profile.db")
 
 
 # COMMANDS
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    print(f'{user}')
+    user_id = user.id
+    user_name = user.first_name
+    database.add_user(connection, user_id, user_name)
     print("Start command ran")
-    await update.message.reply_html(
-        rf"Welcome to the Resume Tailoring Tool. go to /help to find out what you can do")
+    await update.message.reply_html(rf"Welcome to the Resume Tailoring Tool. go to /help to find out what you can do")
 
 
 async def tailor_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -44,8 +50,8 @@ async def job_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     print("Help command ran")
     await update.message.reply_text("/start -> Start command \n/tailorresume -> Create your resume tailored to a "
-                                    "specific position \n/createcoverletter - Create a cover letter based on your "
-                                    "skills and requirements for a \n/jobnotifications - Request to be notified "
+                                    "specific position \n/createcoverletter -> Create a cover letter based on your "
+                                    "skills and requirements for a \n/jobnotifications -> Request to be notified "
                                     "every time a new job is posted on LinkedIn")
 
 
