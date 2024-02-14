@@ -8,6 +8,7 @@ from database import database
 from credentials import credentials
 import sqlite3
 from docx import Document
+import re
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -117,8 +118,32 @@ async def read_doc(update: Update, context: ContextTypes.DEFAULT_TYPE, file_path
     for word in doc.paragraphs:
         full_text.append(word.text)
     document_text = ' '.join(full_text)
-    print(document_text)
+    document_cleaned = re.sub(r'\s+', ' ', document_text)
+    await insert_data_resume_to_database(document_cleaned, update)
     await update.message.reply_text("Thank you")
+
+
+async def insert_data_resume_to_database(document_text, update):
+    user_id = update.effective_user.id
+    resume_id = database.add_resume(connection, user_id)
+    education = str(extract_text_between_keywords(document_text, "EDUCATION", "EXPERIENCE"))
+    database.add_education(connection, resume_id, education)
+    experience = str(extract_text_between_keywords(document_text, "EXPERIENCE", "SKILLS"))
+    database.add_work_experience(connection, resume_id, experience)
+    skills = str(extract_text_from_keyword_to_end(document_text, "SKILLS"))
+    database.add_skill(connection, resume_id, skills)
+
+
+def extract_text_between_keywords(text, start_keyword, end_keyword):
+    pattern = re.compile(re.escape(start_keyword) + '(.*?)' + re.escape(end_keyword), re.S)
+    matches = pattern.search(text)
+    return matches.group(1)
+
+
+def extract_text_from_keyword_to_end(text, start_keyword):
+    pattern = re.compile(re.escape(start_keyword) + '(.*)', re.S)
+    matches = pattern.search(text)
+    return matches.group(1) if matches else None
 
 
 async def tailor_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -140,8 +165,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     print("Help command ran")
     await update.message.reply_text("/start -> Start command \n/tailorresume -> Create your resume tailored to a "
                                     "specific position \n/createcoverletter -> Create a cover letter based on your "
-                                    "skills and requirements for a \n/jobnotifications -> Request to be notified "
-                                    "every time a new job is posted on LinkedIn")
+                                    "skills and requirements \n/jobnotifications -> Request to be notified "
+                                    "every time a new job is posted on LinkedIn \n/profile -> Create or "
+                                    "modify your profile")
 
 
 # HANDLERS
