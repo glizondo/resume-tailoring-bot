@@ -19,7 +19,7 @@ def extract_text_from_keyword_to_end(text, start_keyword):
     return matches.group(1) if matches else None
 
 
-def create_word_template(resume_chat_gpt, user):
+def create_resume(resume_chat_gpt, user):
     doc = Document()
     heading = doc.add_heading(f'{user[1]} {user[2]}', 0)
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER

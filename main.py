@@ -176,7 +176,7 @@ async def receive_job_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     resume_chat_gpt = chatgpt_handler.query_chat_gpt(resume_info, job_info)
     user = database_handler.get_user_by_id(connection, user_id)
     await update.message.reply_text("Almost there...")
-    resume_creator.create_word_template(str(resume_chat_gpt), user)
+    resume_creator.create_resume(str(resume_chat_gpt), user)
     await send_pdf(update, context)
     return ConversationHandler.END
 
