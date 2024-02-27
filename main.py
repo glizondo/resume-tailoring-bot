@@ -4,11 +4,14 @@ import logging
 from pathlib import Path
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, ConversationHandler
-from database import database
+from chatgpt import chatgpt_handler
+from database import database_handler
 from credentials import credentials
 import sqlite3
 from docx import Document
 import re
+from job_search_webs import linkedin_handler
+from resume_creator import resume_creator
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -27,7 +30,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user_name = update.effective_user.first_name
     print(f'{user_id} {user_name}')
     # Check if user exists, add if not add new one
-    exists = database.check_user_exists(connection, user_id, user_name)
+    exists = database_handler.check_user_exists(connection, user_id, user_name)
     print("Start command ran")
     if not exists:
         await update.message.reply_html(
@@ -70,7 +73,12 @@ async def country(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['email'] = update.message.text
+    email_regex = r'^[\w\.-]+@[\w\.-]+\.\w+$'
+    email_input = update.message.text
+    if not re.match(email_regex, email_input):
+        await update.message.reply_text("Invalid email format. Please enter a valid email:")
+        return EMAIL
+    context.user_data['email'] = email_input
     await update.message.reply_text("Phone number")
     return PHONE
 
@@ -82,11 +90,16 @@ async def phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def linkedin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    linkedin_regex = r'^(www\.)?linkedin\.com\/.*$'
+    linkedin_input = update.message.text
+    if not re.match(linkedin_regex, linkedin_input):
+        await update.message.reply_text("Invalid LinkedIn profile URL. Please enter a valid LinkedIn profile URL:")
+        return LINKEDIN  # Stay in the LINKEDIN state
+    context.user_data['linkedin'] = linkedin_input
     user_data = context.user_data
-    user_data['linkedin'] = update.message.text
-    await database.insert_data_user(connection, user_data['last_name'], user_data['city'], user_data['state'],
-                                    user_data['country'], user_data['email'],
-                                    user_data['phone'], user_data['linkedin'], update.effective_user.id)
+    await database_handler.insert_data_user(connection, user_data['last_name'], user_data['city'], user_data['state'],
+                                            user_data['country'], user_data['email'],
+                                            user_data['phone'], user_data['linkedin'], update.effective_user.id)
     await update.message.reply_text("Thank you for sharing your information! Now one more step. Please, add your "
                                     "resume in a word document so I can store your information (Make sure the titles "
                                     "for each section are named EDUCATION, EXPERIENCE, and SKILLS")
@@ -125,13 +138,13 @@ async def read_doc(update: Update, context: ContextTypes.DEFAULT_TYPE, file_path
 
 async def insert_data_resume_to_database(document_text, update):
     user_id = update.effective_user.id
-    resume_id = database.add_resume(connection, user_id)
+    resume_id = database_handler.add_resume(connection, user_id)
     education = str(extract_text_between_keywords(document_text, "EDUCATION", "EXPERIENCE"))
-    database.add_education(connection, resume_id, education)
+    database_handler.add_education(connection, resume_id, education)
     experience = str(extract_text_between_keywords(document_text, "EXPERIENCE", "SKILLS"))
-    database.add_work_experience(connection, resume_id, experience)
+    database_handler.add_work_experience(connection, resume_id, experience)
     skills = str(extract_text_from_keyword_to_end(document_text, "SKILLS"))
-    database.add_skill(connection, resume_id, skills)
+    database_handler.add_skill(connection, resume_id, skills)
 
 
 def extract_text_between_keywords(text, start_keyword, end_keyword):
@@ -146,9 +159,31 @@ def extract_text_from_keyword_to_end(text, start_keyword):
     return matches.group(1) if matches else None
 
 
-async def tailor_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    print("Tailor Resume command ran")
-    await update.message.reply_text("Tailor Resume")
+WAITING_FOR_LINK = 1
+
+
+async def start_tailor_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("Please paste the link from Linkedin that contains the job")
+    return WAITING_FOR_LINK
+
+
+async def receive_job_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    job_link = update.message.text
+    user_id = update.effective_user.id
+    resume_info = database_handler.generate_query_chat_gpt(connection, user_id)
+    job_info = linkedin_handler.get_job_description(job_link)
+    await update.message.reply_text("Generating your resume pdf...")
+    resume_chat_gpt = chatgpt_handler.query_chat_gpt(resume_info, job_info)
+    user = database_handler.get_user_by_id(connection, user_id)
+    await update.message.reply_text("Almost there...")
+    resume_creator.create_word_template(str(resume_chat_gpt), user)
+    await send_pdf(update, context)
+    return ConversationHandler.END
+
+
+async def send_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.message.chat_id
+    await context.bot.send_document(chat_id=chat_id, document=open('resume_created.pdf', 'rb'))
 
 
 async def create_cover_letter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -170,25 +205,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                                     "modify your profile")
 
 
-# HANDLERS
-# def echo_text(update, context):
-#     text = update.message.text
-#     username = ''
-#     try:
-#         username = update.message.chat.first_name
-#     except:
-#         pass
-#     return 'What do you mean by "' + text + '"? ' + f"Please, check the /help command for hints of what to do next"
-
-
-# async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     print(f'Update {update} caused error {context.error}')
-
-
-# async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-#     await update.message.reply_text(echo_text(update, context))
-
-
 # MAIN
 def main() -> None:
     print('Starting bot...')
@@ -197,7 +213,7 @@ def main() -> None:
     # Commands
     app.add_handler(CommandHandler('start', start_command))
     app.add_handler(CommandHandler('help', help_command))
-    app.add_handler(CommandHandler('tailorresume', tailor_resume))
+    # app.add_handler(CommandHandler('tailorresume', start_tailor_resume))
     app.add_handler(CommandHandler('createcoverletter', create_cover_letter))
     app.add_handler(CommandHandler('jobnotifications', job_notifications))
     app.add_handler(CommandHandler('read_doc', read_doc))
@@ -216,8 +232,16 @@ def main() -> None:
         },
         fallbacks=[CommandHandler('cancel', cancel)],
     )
+    conv_handler2 = ConversationHandler(
+        entry_points=[CommandHandler('tailorresume', start_tailor_resume)],
+        states={
+            WAITING_FOR_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_job_link)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+    )
 
     app.add_handler(conv_handler)
+    app.add_handler(conv_handler2)
 
     # Messages
     # app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
