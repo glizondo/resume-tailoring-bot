@@ -2,8 +2,9 @@
 
 import logging
 from pathlib import Path
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, ConversationHandler
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, ConversationHandler, \
+    CallbackQueryHandler, CallbackContext
 from chatgpt import chatgpt_handler
 from database import database_handler
 from credentials import credentials
@@ -172,6 +173,7 @@ async def receive_job_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_id = update.effective_user.id
     resume_info = database_handler.generate_query_chat_gpt(connection, user_id)
     job_info = linkedin_handler.get_job_description(job_link)
+    # print(job_info)
     await update.message.reply_text("Generating your resume pdf...")
     resume_chat_gpt = chatgpt_handler.query_chat_gpt(resume_info, job_info)
     user = database_handler.get_user_by_id(connection, user_id)
@@ -186,10 +188,36 @@ async def send_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.bot.send_document(chat_id=chat_id, document=open('resume_created.pdf', 'rb'))
 
 
-async def create_cover_letter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def create_cover_letter(update: Update, context: CallbackContext) -> None:
     print("Create Cover Letter command ran")
-    await update.message.reply_text("Create Cover Letter")
+    keyboard = [[InlineKeyboardButton(text='Very Formal', callback_data='very_formal')],
+                [InlineKeyboardButton(text='Formal', callback_data='formal')],
+                [InlineKeyboardButton(text='Casual', callback_data='casual')]]
+    markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("What tone do you want on your cover letter?", reply_markup=markup)
+    await handle_response_cover_letter_tone(update, context)
 
+
+async def handle_response_cover_letter_tone(update: Update, context: CallbackContext) -> None:
+    query_tone = update.callback_query
+    await query_tone.answer()
+    if query_tone.data == 'very_formal':
+        await query_tone.edit_message_text("Very")
+        await query_cover_letter_chatgpt_given_tone(update, context, query_tone.data)
+    if query_tone.data == 'formal':
+        await query_tone.edit_message_text("Formal")
+        await query_cover_letter_chatgpt_given_tone(update, context, query_tone.data)
+    if query_tone.data == 'casual':
+        await query_tone.edit_message_text("Casual")
+        await query_cover_letter_chatgpt_given_tone(update, context, query_tone.data)
+
+
+async def query_cover_letter_chatgpt_given_tone(update: Update, context: ContextTypes.DEFAULT_TYPE , tone) -> None:
+    await update.message.reply_text("Wonderful. Please, share the link of the job")
+    job_link = update.message.text
+    user_id = update.effective_user.id
+    resume_info = database_handler.generate_query_chat_gpt(connection, user_id)
+    job_info = linkedin_handler.get_job_description(job_link)
 
 async def job_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     print("Job Notifications command ran")
@@ -205,6 +233,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                                     "modify your profile")
 
 
+async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print(f'Update {update} caused error {context.error}')
+
+
 # MAIN
 def main() -> None:
     print('Starting bot...')
@@ -217,6 +249,8 @@ def main() -> None:
     app.add_handler(CommandHandler('createcoverletter', create_cover_letter))
     app.add_handler(CommandHandler('jobnotifications', job_notifications))
     app.add_handler(CommandHandler('read_doc', read_doc))
+    app.add_handler(CallbackQueryHandler(handle_response_cover_letter_tone))
+
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('profile', handle_profile)],
@@ -248,7 +282,7 @@ def main() -> None:
     # app.add_handler(MessageHandler(filters.TEXT, conv_handler))
 
     # Errors
-    # app.add_error_handler(error)
+    app.add_error_handler(error)
 
     print('Polling...')
     app.run_polling(allowed_updates=Update.ALL_TYPES)
