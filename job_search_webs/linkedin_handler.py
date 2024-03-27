@@ -7,7 +7,7 @@ api = Linkedin(credentials.credentials.user, credentials.credentials.pw)
 
 def get_job_description(job_link):
     job_id = get_job_id(job_link)
-    job_description = get_job_from_id(job_id)
+    job_description = get_job_requirements(job_id)
     return job_description
 
 
@@ -25,7 +25,7 @@ def get_job_id(job_link):
             return job_id_view_link
 
 
-def get_job_from_id(job_id):
+def get_job_requirements(job_id):
     print(f"Job ID: {job_id}")
     job_details = api.get_job(job_id)
     job_requirements = job_details.get('description', 'Job requirements not found.')

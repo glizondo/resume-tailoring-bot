@@ -2,9 +2,9 @@
 
 import logging
 from pathlib import Path
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, ConversationHandler, \
-    CallbackQueryHandler, CallbackContext
+    CallbackQueryHandler
 from chatgpt import chatgpt_handler
 from cover_letter_creator import cover_letter_creator
 from database import database_handler
@@ -14,6 +14,7 @@ from docx import Document
 import re
 from job_search_webs import linkedin_handler
 from resume_creator import resume_creator
+from text_tools import text_extraction
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -179,24 +180,12 @@ async def read_doc(update: Update, context: ContextTypes.DEFAULT_TYPE, file_path
 async def insert_data_resume_to_database(document_text, update):
     user_id = update.effective_user.id
     resume_id = database_handler.add_resume(connection, user_id)
-    education = str(extract_text_between_keywords(document_text, "EDUCATION", "EXPERIENCE"))
+    education = str(text_extraction.extract_text_between_keywords(document_text, "EDUCATION", "EXPERIENCE"))
     database_handler.add_education(connection, resume_id, education)
-    experience = str(extract_text_between_keywords(document_text, "EXPERIENCE", "SKILLS"))
+    experience = str(text_extraction.extract_text_between_keywords(document_text, "EXPERIENCE", "SKILLS"))
     database_handler.add_work_experience(connection, resume_id, experience)
-    skills = str(extract_text_from_keyword_to_end(document_text, "SKILLS"))
+    skills = str(text_extraction.extract_text_from_keyword_to_end(document_text, "SKILLS"))
     database_handler.add_skill(connection, resume_id, skills)
-
-
-def extract_text_between_keywords(text, start_keyword, end_keyword):
-    pattern = re.compile(re.escape(start_keyword) + '(.*?)' + re.escape(end_keyword), re.S)
-    matches = pattern.search(text)
-    return matches.group(1)
-
-
-def extract_text_from_keyword_to_end(text, start_keyword):
-    pattern = re.compile(re.escape(start_keyword) + '(.*)', re.S)
-    matches = pattern.search(text)
-    return matches.group(1) if matches else None
 
 
 WAITING_FOR_LINK_RESUME = 1
@@ -212,7 +201,6 @@ async def receive_job_link_resume_creator(update: Update, context: ContextTypes.
     user_id = update.effective_user.id
     resume_info = database_handler.generate_query_chat_gpt(connection, user_id)
     job_info = linkedin_handler.get_job_description(job_link)
-    # print(job_info)
     await generate_resume_file(context, job_info, resume_info, update, user_id)
     return ConversationHandler.END
 
@@ -227,6 +215,7 @@ async def generate_resume_file(context, job_info, resume_info, update, user_id):
     await context.bot.send_document(chat_id=chat_id, document=open('resume_created.pdf', 'rb'))
     await update.message.reply_text(
         "Thank you.\nIf you did not like the resume give it another try:\n /tailorresume \n /createcoverletter - To create a cover letter")
+
 
 SELECTING_TONE = 0
 WAITING_FOR_LINK_COVER = 1
@@ -245,7 +234,7 @@ async def handle_response_cover_letter_tone(update: Update, context: ContextType
         return SELECTING_TONE
     context.user_data['tone_cover_letter'] = tone
     await update.message.reply_text(f"Thanks for the reply. The cover letter will have a {tone} tone. "
-                                        f"Now, please paste the link from Linkedin that contains the job")
+                                    f"Now, please paste the link from Linkedin that contains the job")
     return WAITING_FOR_LINK_COVER
 
 
@@ -329,7 +318,8 @@ def main() -> None:
         entry_points=[CommandHandler('createcoverletter', create_cover_letter)],
         states={
             SELECTING_TONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_response_cover_letter_tone)],
-            WAITING_FOR_LINK_COVER: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_job_link_cover_letter_creator)],
+            WAITING_FOR_LINK_COVER: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_job_link_cover_letter_creator)],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
         allow_reentry=True
@@ -338,10 +328,6 @@ def main() -> None:
     app.add_handler(conv_handler)
     app.add_handler(conv_handler_resume)
     app.add_handler(conv_handler_cover_letter)
-
-    # Messages
-    # app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
-    # app.add_handler(MessageHandler(filters.TEXT, conv_handler))
 
     # Errors
     app.add_error_handler(error)
