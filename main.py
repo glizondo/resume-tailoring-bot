@@ -6,6 +6,7 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, ConversationHandler, \
     CallbackQueryHandler, CallbackContext
 from chatgpt import chatgpt_handler
+from cover_letter_creator import cover_letter_creator
 from database import database_handler
 from credentials import credentials
 import sqlite3
@@ -158,7 +159,8 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.message.from_user
     logger.info("User %s canceled the conversation.", user.first_name)
     context.user_data.clear()
-    await update.message.reply_text('Cancelled. Please use /start to return to the main menu or /profile to edit your profile again.')
+    await update.message.reply_text(
+        'Cancelled. Please use /start to return to the main menu or /profile to edit your profile again.')
     return ConversationHandler.END
 
 
@@ -197,66 +199,76 @@ def extract_text_from_keyword_to_end(text, start_keyword):
     return matches.group(1) if matches else None
 
 
-WAITING_FOR_LINK = 1
+WAITING_FOR_LINK_RESUME = 1
 
 
 async def start_tailor_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Please paste the link from Linkedin that contains the job")
-    return WAITING_FOR_LINK
+    return WAITING_FOR_LINK_RESUME
 
 
-async def receive_job_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def receive_job_link_resume_creator(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     job_link = update.message.text
     user_id = update.effective_user.id
     resume_info = database_handler.generate_query_chat_gpt(connection, user_id)
     job_info = linkedin_handler.get_job_description(job_link)
     # print(job_info)
-    await update.message.reply_text("Generating your resume pdf...")
-    resume_chat_gpt = chatgpt_handler.query_chat_gpt(resume_info, job_info)
-    user = database_handler.get_user_by_id(connection, user_id)
-    await update.message.reply_text("Almost there...")
-    resume_creator.create_resume(str(resume_chat_gpt), user)
-    await send_pdf(update, context)
-    await update.message.reply_text(
-        "Thank you.\nIf you did not like the resume give it another try:\n /tailorresume \n /createcoverletter - To create a cover letter")
+    await generate_resume_file(context, job_info, resume_info, update, user_id)
     return ConversationHandler.END
 
 
-async def send_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def generate_resume_file(context, job_info, resume_info, update, user_id):
+    await update.message.reply_text("Generating your resume in PDF format...")
+    resume_chat_gpt = chatgpt_handler.resume_chatgpt_query(resume_info, job_info)
+    user = database_handler.get_user_by_id(connection, user_id)
+    await update.message.reply_text("Almost there...")
+    resume_creator.create_resume(str(resume_chat_gpt), user)
     chat_id = update.message.chat_id
     await context.bot.send_document(chat_id=chat_id, document=open('resume_created.pdf', 'rb'))
+    await update.message.reply_text(
+        "Thank you.\nIf you did not like the resume give it another try:\n /tailorresume \n /createcoverletter - To create a cover letter")
+
+SELECTING_TONE = 0
+WAITING_FOR_LINK_COVER = 1
 
 
-async def create_cover_letter(update: Update, context: CallbackContext) -> None:
+async def create_cover_letter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("Create Cover Letter command ran")
-    keyboard = [[InlineKeyboardButton(text='Very Formal', callback_data='very_formal')],
-                [InlineKeyboardButton(text='Formal', callback_data='formal')],
-                [InlineKeyboardButton(text='Casual', callback_data='casual')]]
-    markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("What tone do you want on your cover letter?", reply_markup=markup)
-    await handle_response_cover_letter_tone(update, context)
+    await update.message.reply_text("What tone do you want on your cover letter? (Very formal, Formal, Casual)")
+    return SELECTING_TONE
 
 
-async def handle_response_cover_letter_tone(update: Update, context: CallbackContext) -> None:
-    query_tone = update.callback_query
-    await query_tone.answer()
-    if query_tone.data == 'very_formal':
-        await query_tone.edit_message_text("Very")
-        await query_cover_letter_chatgpt_given_tone(update, context, query_tone.data)
-    if query_tone.data == 'formal':
-        await query_tone.edit_message_text("Formal")
-        await query_cover_letter_chatgpt_given_tone(update, context, query_tone.data)
-    if query_tone.data == 'casual':
-        await query_tone.edit_message_text("Casual")
-        await query_cover_letter_chatgpt_given_tone(update, context, query_tone.data)
+async def handle_response_cover_letter_tone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    tone = update.message.text.lower()
+    if tone not in ['very formal', 'formal', 'casual']:
+        await update.message.reply_text(f"Please enter very formal, formal, or casual")
+        return SELECTING_TONE
+    context.user_data['tone_cover_letter'] = tone
+    await update.message.reply_text(f"Thanks for the reply. The cover letter will have a {tone} tone. "
+                                        f"Now, please paste the link from Linkedin that contains the job")
+    return WAITING_FOR_LINK_COVER
 
 
-async def query_cover_letter_chatgpt_given_tone(update: Update, context: ContextTypes.DEFAULT_TYPE, tone) -> None:
-    await update.message.reply_text("Wonderful. Please, share the link of the job")
+async def receive_job_link_cover_letter_creator(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     job_link = update.message.text
     user_id = update.effective_user.id
     resume_info = database_handler.generate_query_chat_gpt(connection, user_id)
     job_info = linkedin_handler.get_job_description(job_link)
+    tone = context.user_data['tone_cover_letter']
+    await generate_cover_letter_file(update, context, job_info, resume_info, user_id, tone)
+    return ConversationHandler.END
+
+
+async def generate_cover_letter_file(update, context, job_info, resume_info, user_id, tone) -> None:
+    await update.message.reply_text("Generating your cover letter in PDF format...")
+    cover_letter_chatgpt = chatgpt_handler.cover_letter_chatgpt_query(resume_info, job_info, tone)
+    user = database_handler.get_user_by_id(connection, user_id)
+    await update.message.reply_text("Almost there...")
+    cover_letter_creator.create_cover_letter(str(cover_letter_chatgpt), user)
+    chat_id = update.message.chat_id
+    await context.bot.send_document(chat_id=chat_id, document=open('cover_letter_created.pdf', 'rb'))
+    await update.message.reply_text(
+        "Thank you.\nIf you did not like the cover letter give it another try:\n /tailorresume \n /createcoverletter - To create a cover letter")
 
 
 async def job_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -285,7 +297,6 @@ def main() -> None:
     # Commands
     app.add_handler(CommandHandler('start', start_command))
     app.add_handler(CommandHandler('help', help_command))
-    app.add_handler(CommandHandler('createcoverletter', create_cover_letter))
     app.add_handler(CommandHandler('jobnotifications', job_notifications))
     app.add_handler(CommandHandler('read_doc', read_doc))
     app.add_handler(CallbackQueryHandler(handle_response_cover_letter_tone))
@@ -305,17 +316,28 @@ def main() -> None:
         fallbacks=[CommandHandler('cancel', cancel)],
         allow_reentry=True
     )
-    conv_handler2 = ConversationHandler(
+    conv_handler_resume = ConversationHandler(
         entry_points=[CommandHandler('tailorresume', start_tailor_resume)],
         states={
-            WAITING_FOR_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_job_link)],
+            WAITING_FOR_LINK_RESUME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_job_link_resume_creator)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+        allow_reentry=True
+    )
+
+    conv_handler_cover_letter = ConversationHandler(
+        entry_points=[CommandHandler('createcoverletter', create_cover_letter)],
+        states={
+            SELECTING_TONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_response_cover_letter_tone)],
+            WAITING_FOR_LINK_COVER: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_job_link_cover_letter_creator)],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
         allow_reentry=True
     )
 
     app.add_handler(conv_handler)
-    app.add_handler(conv_handler2)
+    app.add_handler(conv_handler_resume)
+    app.add_handler(conv_handler_cover_letter)
 
     # Messages
     # app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))

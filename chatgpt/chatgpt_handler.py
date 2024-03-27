@@ -2,9 +2,8 @@ from openai import OpenAI
 import credentials.credentials
 
 
-def query_chat_gpt(resume_info, job_info):
+def resume_chatgpt_query(resume_info, job_info):
     client = OpenAI(
-        # This is the default and can be omitted
         api_key=credentials.credentials.api_key_chatgpt,
     )
     chat_completion = client.chat.completions.create(
@@ -25,6 +24,35 @@ def query_chat_gpt(resume_info, job_info):
                            f"\n- If necessary, create new bullet points to add relevant key experience in the resume to stand out"
                            f"\n- The design of the bullet points should be black dots that show up in a word document format"
                            f"\n- Ensure that each bullet point contains 40 words at least"
+                           f"\n- Do not include any non-relevant work experience to the job description"
+                           f"\n- Do not include any empty spaces or lines"
+                           f"\n- Finish the prompt with the 'END' keyword"
+                           f"\n- Focus on the technical keywords from the job description to modify the resume:"
+                           f"\nResume:{resume_info}\nJob Description:{job_info}",
+            }
+        ],
+        model="gpt-3.5-turbo",
+    )
+    content = chat_completion.choices[0].message.content
+    print(content)
+    return content
+
+
+def cover_letter_chatgpt_query(resume_info, job_info, tone):
+    client = OpenAI(
+        api_key=credentials.credentials.api_key_chatgpt,
+    )
+    chat_completion = client.chat.completions.create(
+        messages=[
+            {
+                "role": "user",
+                "content": f"Create a cover letter that contains the following properties using the RESUME and the JOB DESCRIPTION provided below:"
+                           f"\n- Keep it under 300 words"
+                           f"\n- Always start exactly with 'Dear Hiring Manager,' even if the tone is more or less formal"
+                           f"\n- Use a {tone} tone for the cover letter"
+                           f"\n- It must include only three paragraphs"
+                           f"\n- Extract the keywords from the JOB DESCRIPTION and include them in the cover letter"
+                           f"\n- Adapt the cover letter so it uses the keywords based on the requirements of the job"
                            f"\n- Do not include any non-relevant work experience to the job description"
                            f"\n- Do not include any empty spaces or lines"
                            f"\n- Finish the prompt with the 'END' keyword"
