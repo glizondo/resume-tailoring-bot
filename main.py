@@ -1,7 +1,11 @@
 # pip install -r requirements.txt
 
 import logging
+import time
+from datetime import datetime
 from pathlib import Path
+from threading import Thread
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, ConversationHandler, \
     CallbackQueryHandler
@@ -129,7 +133,7 @@ async def linkedin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             return LINKEDIN  # Stay in the LINKEDIN state
         context.user_data['linkedin'] = linkedin_input
         user_data = context.user_data
-        await database_handler.insert_data_user(connection, user_data['last_name'], user_data['city'],
+        database_handler.insert_data_user(connection, user_data['last_name'], user_data['city'],
                                                 user_data['state'],
                                                 user_data['country'], user_data['email'],
                                                 user_data['phone'], user_data['linkedin'], update.effective_user.id)
@@ -274,6 +278,18 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                                     "modify your profile")
 
 
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    database_handler.end_session_user(connection, user_id)
+    time_spent = database_handler.calculate_time_user_spent(connection, user_id)
+    await update.message.reply_text(f'Session ended. Total time spent: {time_spent} seconds.')
+
+
+# def message_handler(update:Update, context:ContextTypes.DEFAULT_TYPE):
+#     user_id = update.effective_user.id
+#     database_handler.update_last_interaction(connection, user_id)
+
+
 async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f'Update {update} caused error {context.error}')
 
@@ -285,10 +301,13 @@ def main() -> None:
 
     # Commands
     app.add_handler(CommandHandler('start', start_command))
+    app.add_handler(CommandHandler("stop", stop))
     app.add_handler(CommandHandler('help', help_command))
     app.add_handler(CommandHandler('jobnotifications', job_notifications))
     app.add_handler(CommandHandler('read_doc', read_doc))
     app.add_handler(CallbackQueryHandler(handle_response_cover_letter_tone))
+    # app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), message_handler))
+
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('profile', handle_profile)],
