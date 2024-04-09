@@ -48,6 +48,7 @@ def activity_tracker(func):
         user_id = update.effective_user.id
         reset_user_timer(user_id, update, context)
         return await func(update, context, *args, **kwargs)
+
     return wrapper
 
 
@@ -83,6 +84,7 @@ async def handle_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"Please /start the bot before running any commands"
         )
 
+
 @activity_tracker
 async def last_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
@@ -94,6 +96,7 @@ async def last_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     else:
         await cancel(update, context)
 
+
 @activity_tracker
 async def city(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
@@ -103,6 +106,7 @@ async def city(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return STATE
     else:
         await cancel(update, context)
+
 
 @activity_tracker
 async def state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -114,6 +118,7 @@ async def state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     else:
         await cancel(update, context)
 
+
 @activity_tracker
 async def country(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
@@ -123,6 +128,7 @@ async def country(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return EMAIL
     else:
         await cancel(update, context)
+
 
 @activity_tracker
 async def email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -139,6 +145,7 @@ async def email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     else:
         await cancel(update, context)
 
+
 @activity_tracker
 async def phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
@@ -148,6 +155,7 @@ async def phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return LINKEDIN
     else:
         await cancel(update, context)
+
 
 @activity_tracker
 async def linkedin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -245,15 +253,22 @@ async def receive_job_link_resume_creator(update: Update, context: ContextTypes.
 
 
 async def generate_resume_file(context, job_info, resume_info, update, user_id):
-    await update.message.reply_text("Generating your resume in PDF format...")
-    resume_chat_gpt = chatgpt_handler.resume_chatgpt_query(resume_info, job_info)
-    user = database_handler.get_user_by_id(user_id)
-    await update.message.reply_text("Almost there...")
-    resume_creator.create_resume(str(resume_chat_gpt), user)
-    chat_id = update.message.chat_id
-    await context.bot.send_document(chat_id=chat_id, document=open('resume_created.pdf', 'rb'))
-    await update.message.reply_text(
-        "Thank you.\nIf you did not like the resume give it another try:\n /tailorresume \n /createcoverletter - To create a cover letter")
+    try:
+        await update.message.reply_text("Generating your resume in PDF format...")
+        resume_chat_gpt = chatgpt_handler.resume_chatgpt_query(resume_info, job_info)
+        user = database_handler.get_user_by_id(user_id)
+        await update.message.reply_text("Almost there...")
+        resume_creator.create_resume(str(resume_chat_gpt), user)
+        chat_id = update.message.chat_id
+        await context.bot.send_document(chat_id=chat_id, document=open('resume_created.pdf', 'rb'))
+        await update.message.reply_text(
+            "Thank you.\nIf you did not like the resume give it another try:\n /tailorresume \n /createcoverletter - To create a cover letter")
+    except Exception as e:
+        print(f"An error occurred while generating the resume: {e}")
+        await update.message.reply_text(
+            "Sorry, an error occurred while generating your resume. Please try again.\n"
+            "/tailorresume - To generate a resume\n"
+            "/createcoverletter - To create a cover letter")
 
 
 SELECTING_TONE = 0
@@ -295,15 +310,24 @@ async def receive_job_link_cover_letter_creator(update: Update, context: Context
 
 
 async def generate_cover_letter_file(update, context, job_info, resume_info, user_id, tone) -> None:
-    await update.message.reply_text("Generating your cover letter in PDF format...")
-    cover_letter_chatgpt = chatgpt_handler.cover_letter_chatgpt_query(resume_info, job_info, tone)
-    user = database_handler.get_user_by_id(user_id)
-    await update.message.reply_text("Almost there...")
-    cover_letter_creator.create_cover_letter(str(cover_letter_chatgpt), user)
-    chat_id = update.message.chat_id
-    await context.bot.send_document(chat_id=chat_id, document=open('cover_letter_created.pdf', 'rb'))
-    await update.message.reply_text(
-        "Thank you.\nIf you did not like the cover letter give it another try:\n /tailorresume \n /createcoverletter - To create a cover letter")
+    try:
+        await update.message.reply_text("Generating your cover letter in PDF format...")
+        cover_letter_chatgpt = chatgpt_handler.cover_letter_chatgpt_query(resume_info, job_info, tone)
+        user = database_handler.get_user_by_id(user_id)
+        await update.message.reply_text("Almost there...")
+        cover_letter_creator.create_cover_letter(str(cover_letter_chatgpt), user)
+        chat_id = update.message.chat_id
+        await context.bot.send_document(chat_id=chat_id, document=open('cover_letter_created.pdf', 'rb'))
+        await update.message.reply_text(
+            "Thank you.\nIf you did not like the cover letter give it another try:\n"
+            "/tailorresume - To generate a resume\n"
+            "/createcoverletter - To create a cover letter")
+    except Exception as e:
+        print(f"An error occurred while generating the resume: {e}")
+        await update.message.reply_text(
+            "Sorry, an error occurred while generating your cover letter. Please try again.\n"
+            "/tailorresume - To generate a resume\n"
+            "/createcoverletter - To create a cover letter")
 
 
 @activity_tracker
@@ -344,7 +368,7 @@ async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MAIN
 def main() -> None:
     print('Starting bot...')
-    app = Application.builder().token(credentials.bot_token).build()
+    app = Application.builder().token(credentials.bot_token).connection_pool_size(3).build()
 
     # Commands
     app.add_handler(CommandHandler('start', start_command))
