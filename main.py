@@ -243,14 +243,19 @@ async def start_tailor_resume(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
 
+
+
 async def receive_job_link_resume_creator(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     job_link = update.message.text
     user_id = update.effective_user.id
-    resume_info = database_handler.generate_query_chat_gpt(user_id)
-    job_info = linkedin_handler.get_job_description(job_link)
-    await generate_resume_file(context, job_info, resume_info, update, user_id)
-    return ConversationHandler.END
-
+    user_response = update.message.text
+    if user_response != 'CANCEL':
+        resume_info = database_handler.generate_query_chat_gpt(user_id)
+        job_info = linkedin_handler.get_job_description(job_link)
+        await generate_resume_file(context, job_info, resume_info, update, user_id)
+        return ConversationHandler.END
+    else:
+        await cancel(update, context)
 
 async def generate_resume_file(context, job_info, resume_info, update, user_id):
     try:
@@ -289,15 +294,18 @@ async def create_cover_letter(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def handle_response_cover_letter_tone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    tone = update.message.text.lower()
-    if tone not in ['very formal', 'formal', 'casual']:
-        await update.message.reply_text(f"Please enter very formal, formal, or casual")
-        return SELECTING_TONE
-    context.user_data['tone_cover_letter'] = tone
-    await update.message.reply_text(f"Thanks for the reply. The cover letter will have a {tone} tone. "
-                                    f"Now, please paste the link from Linkedin that contains the job")
-    return WAITING_FOR_LINK_COVER
-
+    user_response = update.message.text
+    if user_response != 'CANCEL':
+        tone = user_response.lower()
+        if tone not in ['very formal', 'formal', 'casual']:
+            await update.message.reply_text(f"Please enter very formal, formal, or casual")
+            return SELECTING_TONE
+        context.user_data['tone_cover_letter'] = tone
+        await update.message.reply_text(f"Thanks for the reply. The cover letter will have a {tone} tone. "
+                                        f"Now, please paste the link from Linkedin that contains the job")
+        return WAITING_FOR_LINK_COVER
+    else:
+        await cancel(update, context)
 
 async def receive_job_link_cover_letter_creator(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     job_link = update.message.text
