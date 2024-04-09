@@ -1,11 +1,10 @@
 # pip install -r requirements.txt
 
+import asyncio
 import logging
-import time
-from datetime import datetime
+from functools import wraps
 from pathlib import Path
-from threading import Thread
-
+from threading import Thread, Timer
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, ConversationHandler, \
     CallbackQueryHandler
@@ -13,7 +12,6 @@ from chatgpt import chatgpt_handler
 from cover_letter_creator import cover_letter_creator
 from database import database_handler
 from credentials import credentials
-import sqlite3
 from docx import Document
 import re
 from job_search_webs import linkedin_handler
@@ -26,18 +24,40 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-connection = sqlite3.connect("./database/resume-bot.db")
-
 LASTNAME, CITY, STATE, COUNTRY, EMAIL, PHONE, LINKEDIN, RESUME = range(8)
+
+user_timers = {}
+
+
+def reset_user_timer(user_id, update, context):
+    global user_timers
+    if user_id in user_timers:
+        user_timers[user_id].cancel()
+
+    def after_inactivity():
+        asyncio.run(stop(update, context))
+
+    timer = Timer(90, after_inactivity)
+    timer.start()
+    user_timers[user_id] = timer
+
+
+def activity_tracker(func):
+    @wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+        user_id = update.effective_user.id
+        reset_user_timer(user_id, update, context)
+        return await func(update, context, *args, **kwargs)
+    return wrapper
 
 
 # COMMANDS
+@activity_tracker
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name
     print(f'{user_id} {user_name}')
-    # Check if user exists, add if not add new one
-    exists = database_handler.check_user_exists(connection, user_id, user_name)
+    exists = database_handler.check_user_exists(user_id, user_name)
     print("Start command ran")
     if not exists:
         await update.message.reply_html(
@@ -47,9 +67,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             rf"Welcome again to the Resume Tailoring Tool, {user_name}. go to /help to find out what you can do or to /profile to modify your personal and resume information")
 
 
+@activity_tracker
 async def handle_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
-    if database_handler.get_status_session(connection, user_id):
+    if database_handler.get_status_session(user_id):
         print(f'handle profile {update.message.text}')
         context.user_data.clear()
         await update.message.reply_text(
@@ -62,7 +83,7 @@ async def handle_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"Please /start the bot before running any commands"
         )
 
-
+@activity_tracker
 async def last_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
     print(f'last name {update.message.text}')
@@ -73,7 +94,7 @@ async def last_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     else:
         await cancel(update, context)
 
-
+@activity_tracker
 async def city(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
     if user_response != 'CANCEL':
@@ -83,7 +104,7 @@ async def city(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     else:
         await cancel(update, context)
 
-
+@activity_tracker
 async def state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
     if user_response != 'CANCEL':
@@ -93,7 +114,7 @@ async def state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     else:
         await cancel(update, context)
 
-
+@activity_tracker
 async def country(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
     if user_response != 'CANCEL':
@@ -103,7 +124,7 @@ async def country(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     else:
         await cancel(update, context)
 
-
+@activity_tracker
 async def email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
     if user_response != 'CANCEL':
@@ -118,7 +139,7 @@ async def email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     else:
         await cancel(update, context)
 
-
+@activity_tracker
 async def phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
     if user_response != 'CANCEL':
@@ -128,7 +149,7 @@ async def phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     else:
         await cancel(update, context)
 
-
+@activity_tracker
 async def linkedin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
     if user_response != 'CANCEL':
@@ -139,7 +160,7 @@ async def linkedin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             return LINKEDIN  # Stay in the LINKEDIN state
         context.user_data['linkedin'] = linkedin_input
         user_data = context.user_data
-        database_handler.insert_data_user(connection, user_data['last_name'], user_data['city'],
+        database_handler.insert_data_user(user_data['last_name'], user_data['city'],
                                           user_data['state'],
                                           user_data['country'], user_data['email'],
                                           user_data['phone'], user_data['linkedin'], update.effective_user.id)
@@ -151,6 +172,7 @@ async def linkedin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await cancel(update, context)
 
 
+@activity_tracker
 async def resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
     if user_response != 'CANCEL':
@@ -189,21 +211,22 @@ async def read_doc(update: Update, context: ContextTypes.DEFAULT_TYPE, file_path
 
 async def insert_data_resume_to_database(document_text, update):
     user_id = update.effective_user.id
-    resume_id = database_handler.add_resume(connection, user_id)
+    resume_id = database_handler.add_resume(user_id)
     education = str(text_extraction.extract_text_between_keywords(document_text, "EDUCATION", "EXPERIENCE"))
-    database_handler.add_education(connection, resume_id, education)
+    database_handler.add_education(resume_id, education)
     experience = str(text_extraction.extract_text_between_keywords(document_text, "EXPERIENCE", "SKILLS"))
-    database_handler.add_work_experience(connection, resume_id, experience)
+    database_handler.add_work_experience(resume_id, experience)
     skills = str(text_extraction.extract_text_from_keyword_to_end(document_text, "SKILLS"))
-    database_handler.add_skill(connection, resume_id, skills)
+    database_handler.add_skill(resume_id, skills)
 
 
 WAITING_FOR_LINK_RESUME = 1
 
 
+@activity_tracker
 async def start_tailor_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
-    if database_handler.get_status_session(connection, user_id):
+    if database_handler.get_status_session(user_id):
         await update.message.reply_text("Please paste the link from Linkedin that contains the job")
         return WAITING_FOR_LINK_RESUME
     else:
@@ -215,7 +238,7 @@ async def start_tailor_resume(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def receive_job_link_resume_creator(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     job_link = update.message.text
     user_id = update.effective_user.id
-    resume_info = database_handler.generate_query_chat_gpt(connection, user_id)
+    resume_info = database_handler.generate_query_chat_gpt(user_id)
     job_info = linkedin_handler.get_job_description(job_link)
     await generate_resume_file(context, job_info, resume_info, update, user_id)
     return ConversationHandler.END
@@ -224,7 +247,7 @@ async def receive_job_link_resume_creator(update: Update, context: ContextTypes.
 async def generate_resume_file(context, job_info, resume_info, update, user_id):
     await update.message.reply_text("Generating your resume in PDF format...")
     resume_chat_gpt = chatgpt_handler.resume_chatgpt_query(resume_info, job_info)
-    user = database_handler.get_user_by_id(connection, user_id)
+    user = database_handler.get_user_by_id(user_id)
     await update.message.reply_text("Almost there...")
     resume_creator.create_resume(str(resume_chat_gpt), user)
     chat_id = update.message.chat_id
@@ -237,9 +260,10 @@ SELECTING_TONE = 0
 WAITING_FOR_LINK_COVER = 1
 
 
+@activity_tracker
 async def create_cover_letter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
-    if database_handler.get_status_session(connection, user_id):
+    if database_handler.get_status_session(user_id):
         print("Create Cover Letter command ran")
         await update.message.reply_text("What tone do you want on your cover letter? (Very formal, Formal, Casual)")
         return SELECTING_TONE
@@ -263,7 +287,7 @@ async def handle_response_cover_letter_tone(update: Update, context: ContextType
 async def receive_job_link_cover_letter_creator(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     job_link = update.message.text
     user_id = update.effective_user.id
-    resume_info = database_handler.generate_query_chat_gpt(connection, user_id)
+    resume_info = database_handler.generate_query_chat_gpt(user_id)
     job_info = linkedin_handler.get_job_description(job_link)
     tone = context.user_data['tone_cover_letter']
     await generate_cover_letter_file(update, context, job_info, resume_info, user_id, tone)
@@ -273,7 +297,7 @@ async def receive_job_link_cover_letter_creator(update: Update, context: Context
 async def generate_cover_letter_file(update, context, job_info, resume_info, user_id, tone) -> None:
     await update.message.reply_text("Generating your cover letter in PDF format...")
     cover_letter_chatgpt = chatgpt_handler.cover_letter_chatgpt_query(resume_info, job_info, tone)
-    user = database_handler.get_user_by_id(connection, user_id)
+    user = database_handler.get_user_by_id(user_id)
     await update.message.reply_text("Almost there...")
     cover_letter_creator.create_cover_letter(str(cover_letter_chatgpt), user)
     chat_id = update.message.chat_id
@@ -282,9 +306,10 @@ async def generate_cover_letter_file(update, context, job_info, resume_info, use
         "Thank you.\nIf you did not like the cover letter give it another try:\n /tailorresume \n /createcoverletter - To create a cover letter")
 
 
+@activity_tracker
 async def job_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
-    if database_handler.get_status_session(connection, user_id):
+    if database_handler.get_status_session(user_id):
         print("Job Notifications command ran")
         await update.message.reply_text("Job Notifications")
     else:
@@ -292,6 +317,8 @@ async def job_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             f"Please /start the bot before running any commands"
         )
 
+
+@activity_tracker
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     print("Help command ran")
     await update.message.reply_text("/start -> Start command \n/tailorresume -> Create your resume tailored to a "
@@ -303,16 +330,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
-    database_handler.end_session_user(connection, user_id)
-    session_duration = database_handler.calculate_time_user_spent(connection, user_id)
-    database_handler.add_visitor(connection, user_id, session_duration)
+    database_handler.end_session_user(user_id)
+    session_duration = database_handler.calculate_time_user_spent(user_id)
+    database_handler.add_visitor(user_id, session_duration)
     print(f'Session ended. Total time spent: {session_duration} seconds.')
     await update.message.reply_text("Thank you for using the Resume Tailoring Chat Bot. Come back anytime!")
-
-
-# def message_handler(update:Update, context:ContextTypes.DEFAULT_TYPE):
-#     user_id = update.effective_user.id
-#     database_handler.update_last_interaction(connection, user_id)
 
 
 async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -331,7 +353,6 @@ def main() -> None:
     app.add_handler(CommandHandler('jobnotifications', job_notifications))
     app.add_handler(CommandHandler('read_doc', read_doc))
     app.add_handler(CallbackQueryHandler(handle_response_cover_letter_tone))
-    # app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), message_handler))
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('profile', handle_profile)],
