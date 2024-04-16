@@ -29,32 +29,36 @@ LASTNAME, CITY, STATE, COUNTRY, EMAIL, PHONE, LINKEDIN, RESUME = range(8)
 user_timers = {}
 
 
-def reset_user_timer(user_id, update, context):
+async def reset_user_timer(user_id, update, context):
     global user_timers
     if user_id in user_timers:
         user_timers[user_id].cancel()
 
-    def after_inactivity():
-        asyncio.run(stop(update, context))
+    async def after_inactivity():
+        await stop(update, context)
 
-    timer = Timer(90, after_inactivity)
-    timer.start()
-    user_timers[user_id] = timer
+    if user_id in user_timers:
+        user_timers[user_id].cancel()
+    user_timers[user_id] = asyncio.create_task(run_timer(30, after_inactivity))
+
+
+async def run_timer(delay, callback):
+    await asyncio.sleep(delay)
+    await callback()
 
 
 def activity_tracker(func):
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         user_id = update.effective_user.id
-        reset_user_timer(user_id, update, context)
+        await reset_user_timer(user_id, update, context)
         return await func(update, context, *args, **kwargs)
-
     return wrapper
 
 
 # COMMANDS
 @activity_tracker
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name
     print(f'{user_id} {user_name}')
@@ -70,25 +74,27 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 @activity_tracker
 async def handle_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user_id = update.effective_user.id
-    if database_handler.get_status_session(user_id):
-        print(f'handle profile {update.message.text}')
-        context.user_data.clear()
+    try:
+        user_id = update.effective_user.id
+        if database_handler.get_status_session(user_id):
+            print(f'handle profile {update.message.text}')
+            context.user_data.clear()
+            await update.message.reply_text(
+                f"Welcome! Type CANCEL to cancel and go back main menu. Let's start editing your profile {update.effective_user.first_name}. What is your last name?"
+            )
+            return LASTNAME
+        else:
+            await update.message.reply_text(
+                f"Please /start the bot before running any commands"
+            )
+    except Exception as e:
         await update.message.reply_text(
-            f"Welcome! Type CANCEL to cancel and go back main menu. Let's start editing your profile {update.effective_user.first_name}. What is your last name?"
-        )
-        # print(update.message.from_user)
-        return LASTNAME
-    else:
-        await update.message.reply_text(
-            f"Please /start the bot before running any commands"
-        )
+            f"Please /start the bot before running any commands")
 
 
 @activity_tracker
-async def last_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def profile_lastname(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
-    print(f'last name {update.message.text}')
     if user_response != 'CANCEL':
         context.user_data['last_name'] = user_response
         await update.message.reply_text("What is your city?")
@@ -98,7 +104,7 @@ async def last_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 @activity_tracker
-async def city(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def profile_city(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
     if user_response != 'CANCEL':
         context.user_data['city'] = user_response
@@ -109,7 +115,7 @@ async def city(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 @activity_tracker
-async def state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def profile_state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
     if user_response != 'CANCEL':
         context.user_data['state'] = user_response
@@ -120,7 +126,7 @@ async def state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 @activity_tracker
-async def country(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def profile_country(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
     if user_response != 'CANCEL':
         context.user_data['country'] = user_response
@@ -131,7 +137,7 @@ async def country(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 @activity_tracker
-async def email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def profile_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
     if user_response != 'CANCEL':
         email_regex = r'^[\w\.-]+@[\w\.-]+\.\w+$'
@@ -147,7 +153,7 @@ async def email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 @activity_tracker
-async def phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def profile_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
     if user_response != 'CANCEL':
         context.user_data['phone'] = user_response
@@ -158,30 +164,34 @@ async def phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 @activity_tracker
-async def linkedin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def profile_linkedin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
     if user_response != 'CANCEL':
         linkedin_regex = r'^(www\.)?linkedin\.com\/.*$'
         linkedin_input = user_response
         if not re.match(linkedin_regex, linkedin_input):
             await update.message.reply_text("Invalid LinkedIn profile URL. Please enter a valid LinkedIn profile URL:")
-            return LINKEDIN  # Stay in the LINKEDIN state
+            return LINKEDIN
         context.user_data['linkedin'] = linkedin_input
         user_data = context.user_data
-        database_handler.insert_data_user(user_data['last_name'], user_data['city'],
-                                          user_data['state'],
-                                          user_data['country'], user_data['email'],
-                                          user_data['phone'], user_data['linkedin'], update.effective_user.id)
-        await update.message.reply_text("Thank you for sharing your information! Now one more step. Please, add your "
-                                        "resume in a word document so I can store your information (Make sure the titles "
-                                        "for each section are named EDUCATION, EXPERIENCE, and SKILLS")
+        await create_profile_database(update, user_data)
         return RESUME
     else:
         await cancel(update, context)
 
 
+async def create_profile_database(update, user_data):
+    database_handler.insert_data_user(user_data['last_name'], user_data['city'],
+                                      user_data['state'],
+                                      user_data['country'], user_data['email'],
+                                      user_data['phone'], user_data['linkedin'], update.effective_user.id)
+    await update.message.reply_text("Thank you for sharing your information! Now one more step. Please, add your "
+                                    "resume in a word document so I can store your information (Make sure the titles "
+                                    "for each section are named EDUCATION, EXPERIENCE, and SKILLS")
+
+
 @activity_tracker
-async def resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def profile_resume_file_word(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_response = update.message.text
     if user_response != 'CANCEL':
         document_id = update.message.document
@@ -190,22 +200,13 @@ async def resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         print(f'Document ID: {document_id}')
         file_path = Path(str(r"resumes/resume.docx"))
         await document.download_to_drive(custom_path=file_path)
-        await read_doc(update, context, file_path)
+        await read_resume_word(update, context, file_path)
         return ConversationHandler.END
     else:
         await cancel(update, context)
 
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user = update.message.from_user
-    logger.info("User %s canceled the conversation.", user.first_name)
-    context.user_data.clear()
-    await update.message.reply_text(
-        'Cancelled. Please use /start to return to the main menu or /profile to edit your profile again.')
-    return ConversationHandler.END
-
-
-async def read_doc(update: Update, context: ContextTypes.DEFAULT_TYPE, file_path) -> None:
+async def read_resume_word(update: Update, context: ContextTypes.DEFAULT_TYPE, file_path) -> None:
     doc = Document(file_path)
     full_text = []
     for word in doc.paragraphs:
@@ -233,16 +234,18 @@ WAITING_FOR_LINK_RESUME = 1
 
 @activity_tracker
 async def start_tailor_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user_id = update.effective_user.id
-    if database_handler.get_status_session(user_id):
-        await update.message.reply_text("Please paste the link from Linkedin that contains the job")
-        return WAITING_FOR_LINK_RESUME
-    else:
+    try:
+        user_id = update.effective_user.id
+        if database_handler.get_status_session(user_id):
+            await update.message.reply_text("Please paste the link from Linkedin that contains the job")
+            return WAITING_FOR_LINK_RESUME
+        else:
+            await update.message.reply_text(
+                f"Please /start the bot before running any commands"
+            )
+    except Exception as e:
         await update.message.reply_text(
-            f"Please /start the bot before running any commands"
-        )
-
-
+            f"Please /start the bot before running any commands")
 
 
 async def receive_job_link_resume_creator(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -256,6 +259,7 @@ async def receive_job_link_resume_creator(update: Update, context: ContextTypes.
         return ConversationHandler.END
     else:
         await cancel(update, context)
+
 
 async def generate_resume_file(context, job_info, resume_info, update, user_id):
     try:
@@ -282,15 +286,19 @@ WAITING_FOR_LINK_COVER = 1
 
 @activity_tracker
 async def create_cover_letter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user_id = update.effective_user.id
-    if database_handler.get_status_session(user_id):
-        print("Create Cover Letter command ran")
-        await update.message.reply_text("What tone do you want on your cover letter? (Very formal, Formal, Casual)")
-        return SELECTING_TONE
-    else:
+    try:
+        user_id = update.effective_user.id
+        if database_handler.get_status_session(user_id):
+            print("Create Cover Letter command ran")
+            await update.message.reply_text("What tone do you want on your cover letter? (Very formal, Formal, Casual)")
+            return SELECTING_TONE
+        else:
+            await update.message.reply_text(
+                f"Please /start the bot before running any commands"
+            )
+    except Exception as e:
         await update.message.reply_text(
-            f"Please /start the bot before running any commands"
-        )
+            f"Please /start the bot before running any commands")
 
 
 async def handle_response_cover_letter_tone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -306,6 +314,7 @@ async def handle_response_cover_letter_tone(update: Update, context: ContextType
         return WAITING_FOR_LINK_COVER
     else:
         await cancel(update, context)
+
 
 async def receive_job_link_cover_letter_creator(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     job_link = update.message.text
@@ -351,13 +360,22 @@ async def job_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 @activity_tracker
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     print("Help command ran")
     await update.message.reply_text("/start -> Start command \n/tailorresume -> Create your resume tailored to a "
                                     "specific position \n/createcoverletter -> Create a cover letter based on your "
                                     "skills and requirements \n/jobnotifications -> Request to be notified "
                                     "every time a new job is posted on LinkedIn \n/profile -> Create or "
                                     "modify your profile")
+
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.message.from_user
+    logger.info("User %s canceled the conversation.", user.first_name)
+    context.user_data.clear()
+    await update.message.reply_text(
+        'Cancelled. Please use /start to return to the main menu or /profile to edit your profile again.')
+    return ConversationHandler.END
 
 
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -367,6 +385,9 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     database_handler.add_visitor(user_id, session_duration)
     print(f'Session ended. Total time spent: {session_duration} seconds.')
     await update.message.reply_text("Thank you for using the Resume Tailoring Chat Bot. Come back anytime!")
+    if user_id in user_timers:
+        user_timers[user_id].cancel()
+        del user_timers[user_id]
 
 
 async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -376,27 +397,27 @@ async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MAIN
 def main() -> None:
     print('Starting bot...')
-    app = Application.builder().token(credentials.bot_token).connection_pool_size(3).build()
+    app = Application.builder().token(credentials.bot_token).connection_pool_size(10).pool_timeout(60).build()
 
     # Commands
-    app.add_handler(CommandHandler('start', start_command))
+    app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler("stop", stop))
-    app.add_handler(CommandHandler('help', help_command))
+    app.add_handler(CommandHandler('help', help))
     app.add_handler(CommandHandler('jobnotifications', job_notifications))
-    app.add_handler(CommandHandler('read_doc', read_doc))
+    app.add_handler(CommandHandler('read_doc', read_resume_word))
     app.add_handler(CallbackQueryHandler(handle_response_cover_letter_tone))
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('profile', handle_profile)],
         states={
-            LASTNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, last_name)],
-            CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, city)],
-            STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, state)],
-            COUNTRY: [MessageHandler(filters.TEXT & ~filters.COMMAND, country)],
-            EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, email)],
-            PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, phone)],
-            LINKEDIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, linkedin)],
-            RESUME: [MessageHandler(filters.ATTACHMENT & ~filters.COMMAND, resume)],
+            LASTNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, profile_lastname)],
+            CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, profile_city)],
+            STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, profile_state)],
+            COUNTRY: [MessageHandler(filters.TEXT & ~filters.COMMAND, profile_country)],
+            EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, profile_email)],
+            PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, profile_phone)],
+            LINKEDIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, profile_linkedin)],
+            RESUME: [MessageHandler(filters.ATTACHMENT & ~filters.COMMAND, profile_resume_file_word)],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
         allow_reentry=True
