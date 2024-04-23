@@ -4,7 +4,6 @@ import asyncio
 import logging
 from functools import wraps
 from pathlib import Path
-from threading import Thread, Timer
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, ConversationHandler, \
     CallbackQueryHandler
@@ -39,7 +38,7 @@ async def reset_user_timer(user_id, update, context):
 
     if user_id in user_timers:
         user_timers[user_id].cancel()
-    user_timers[user_id] = asyncio.create_task(run_timer(30, after_inactivity))
+    user_timers[user_id] = asyncio.create_task(run_timer(60, after_inactivity))
 
 
 async def run_timer(delay, callback):
@@ -237,8 +236,12 @@ async def start_tailor_resume(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         user_id = update.effective_user.id
         if database_handler.get_status_session(user_id):
-            await update.message.reply_text("Please paste the link from Linkedin that contains the job")
-            return WAITING_FOR_LINK_RESUME
+            if database_handler.get_last_resume(user_id) != 0:
+                await update.message.reply_text("Please paste the link from Linkedin that contains the job")
+                return WAITING_FOR_LINK_RESUME
+            else:
+                await update.message.reply_text(
+                    f"Please create a /profile and add a previous resume before using the resume generator")
         else:
             await update.message.reply_text(
                 f"Please /start the bot before running any commands"
@@ -246,6 +249,7 @@ async def start_tailor_resume(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         await update.message.reply_text(
             f"Please /start the bot before running any commands")
+
 
 
 async def receive_job_link_resume_creator(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -289,9 +293,13 @@ async def create_cover_letter(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         user_id = update.effective_user.id
         if database_handler.get_status_session(user_id):
-            print("Create Cover Letter command ran")
-            await update.message.reply_text("What tone do you want on your cover letter? (Very formal, Formal, Casual)")
-            return SELECTING_TONE
+            if database_handler.get_last_resume(user_id) != 0:
+                print("Create Cover Letter command ran")
+                await update.message.reply_text("What tone do you want on your cover letter? (Very formal, Formal, Casual)")
+                return SELECTING_TONE
+            else:
+                await update.message.reply_text(
+                    f"Please create a /profile and add a previous resume before using the cover letter generator")
         else:
             await update.message.reply_text(
                 f"Please /start the bot before running any commands"
@@ -347,16 +355,16 @@ async def generate_cover_letter_file(update, context, job_info, resume_info, use
             "/createcoverletter - To create a cover letter")
 
 
-@activity_tracker
-async def job_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.effective_user.id
-    if database_handler.get_status_session(user_id):
-        print("Job Notifications command ran")
-        await update.message.reply_text("Job Notifications")
-    else:
-        await update.message.reply_text(
-            f"Please /start the bot before running any commands"
-        )
+# @activity_tracker
+# async def job_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+#     user_id = update.effective_user.id
+#     if database_handler.get_status_session(user_id):
+#         print("Job Notifications command ran")
+#         await update.message.reply_text("Job Notifications")
+#     else:
+#         await update.message.reply_text(
+#             f"Please /start the bot before running any commands"
+#         )
 
 
 @activity_tracker
@@ -364,8 +372,7 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     print("Help command ran")
     await update.message.reply_text("/start -> Start command \n/tailorresume -> Create your resume tailored to a "
                                     "specific position \n/createcoverletter -> Create a cover letter based on your "
-                                    "skills and requirements \n/jobnotifications -> Request to be notified "
-                                    "every time a new job is posted on LinkedIn \n/profile -> Create or "
+                                    "skills and requirements \n/profile -> Create or "
                                     "modify your profile")
 
 
@@ -403,7 +410,7 @@ def main() -> None:
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler("stop", stop))
     app.add_handler(CommandHandler('help', help))
-    app.add_handler(CommandHandler('jobnotifications', job_notifications))
+    # app.add_handler(CommandHandler('jobnotifications', job_notifications))
     app.add_handler(CommandHandler('read_doc', read_resume_word))
     app.add_handler(CallbackQueryHandler(handle_response_cover_letter_tone))
 
