@@ -8,7 +8,6 @@ from src.handlers import setup_handlers
 
 def setup_logging():
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.WARNING)
-
     httpx_logger = logging.getLogger("httpx")
     httpx_logger.setLevel(logging.WARNING)
 
