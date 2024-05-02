@@ -1,4 +1,4 @@
-/credentials
-/database/
-/resumes/
+/src/credentials
+/src/database/
+/src/resumes/
 /resume-bot.db
