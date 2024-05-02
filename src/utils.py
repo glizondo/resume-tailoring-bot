@@ -6,6 +6,7 @@ from telegram.ext import ContextTypes
 from src import handlers
 
 user_timers = {}
+time_out_session = 60
 
 
 def activity_tracker(func):
@@ -22,7 +23,7 @@ async def reset_user_timer(user_id, update, context):
     if user_id in user_timers:
         user_timers[user_id].cancel()
 
-    user_timers[user_id] = asyncio.create_task(run_timer(60, user_id, update, context))
+    user_timers[user_id] = asyncio.create_task(run_timer(time_out_session, user_id, update, context))
 
 
 async def run_timer(delay, user_id, update, context):

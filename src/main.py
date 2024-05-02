@@ -12,9 +12,6 @@ def setup_logging():
     httpx_logger = logging.getLogger("httpx")
     httpx_logger.setLevel(logging.WARNING)
 
-    # telegram_logger = logging.getLogger("telegram")
-    # telegram_logger.setLevel(logging.WARNING)
-
 
 def setup_bot():
     app = Application.builder().token(credentials.bot_token).build()

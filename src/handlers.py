@@ -1,6 +1,4 @@
-import os
 import re
-import sys
 from pathlib import Path
 from docx import Document
 from telegram import Update
@@ -33,7 +31,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         database_handler.add_user(user_id, user_name)
         await update.message.reply_html(
             rf"Welcome to the Resume Tailoring Tool. It looks like you are new here, {user_name}. Please access your /profile to add information that will be added to your resume")
-
 
 
 # STARTS PROFILE CREATION/UPDATE given a user id and once lastname is entered, it runs profile_lastname
@@ -172,7 +169,6 @@ async def create_profile_database(update, user_data):
                                       user_data['state'],
                                       user_data['country'], user_data['email'],
                                       user_data['phone'], user_data['linkedin'], update.effective_user.id)
-
 
 
 # Last step of profile creation. Gets the response from user and ends conversation once word doc has been read and
@@ -378,7 +374,7 @@ async def cancel(update, context: ContextTypes):
 
 
 # Stops the bot and triggers the end of the session. Stores the information in database
-async def stop(update: Update, context:ContextTypes.DEFAULT_TYPE) -> None:
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     database_handler.end_session_user(user_id)
     session_duration = database_handler.calculate_time_user_spent(user_id)
@@ -397,8 +393,6 @@ async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def setup_handlers(app):
     print('Starting bot...')
-    # app = Application.builder().token(credentials.bot_token).connection_pool_size(10).pool_timeout(60).build()
-
     # Commands
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler("stop", stop))
