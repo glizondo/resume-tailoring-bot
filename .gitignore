@@ -2,3 +2,4 @@
 /src/database/
 /src/resumes/
 /resume-bot.db
+/.env
